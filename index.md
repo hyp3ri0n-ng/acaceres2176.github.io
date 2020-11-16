@@ -18,7 +18,7 @@ Note that the fuzzfile for now, because it is simply using decept proxy is actua
 
 Once stuff is up and running you should see:
 
-```**********The Mutiny Fuzzing Framework**********
+**********The Mutiny Fuzzing Framework**********
 jaspadar@cisco.com && liwyatt@cisco.com <(^_^)>|
 ************************************************
 Monitor locking execution till condition met
@@ -29,6 +29,7 @@ Message 0, seed: 3381, old len: 197, new len 328
 Message 0, seed: 3382, old len: 197, new len 216
 Message 0, seed: 3383, old len: 197, new len 230
 Message 0, seed: 3385, old len: 197, new len 195
-Message 0, seed: 3386, old len: 197, new len 203```
+Message 0, seed: 3386, old len: 197, new len 203
+
 
 Mutiny will start Mutiny-ing. Boom, we've network fuzzed. Note that mutiny/decept support a pretty decent set of options, you can MITM TLS and SSH traffic, create .fuzzer files from pcaps, and override a bunch of stuff. This is just the basics, but really you can extend the above concept quite a bit to fuzz a bunch of stuff quite quickly. I started fuzzing 3 web servers in about 5-10 minutes (and then wrote this up in another 5). That's pretty damn good.
