@@ -20,10 +20,8 @@ Once stuff is up and running you should see:
 
 \*\*\*\*\*\*\*\*\*\*\The Mutiny Fuzzing Framework\*\*\*\*\*\*\*\*\*\*\
 jaspadar@cisco.com && liwyatt@cisco.com <(^_^)>|
-************************************************
 Monitor locking execution till condition met\
 [*] Target detected, fuzzing.\
-************************************************\
 Message 0, seed: 3380, old len: 197, new len 230\
 Message 0, seed: 3381, old len: 197, new len 328\
 Message 0, seed: 3382, old len: 197, new len 216\
