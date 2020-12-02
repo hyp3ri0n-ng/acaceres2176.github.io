@@ -79,6 +79,68 @@ So in a way you can think of it as the OS procrastinating and saying "eh I'll do
  
 So anyway, this low-levely stuff is the kind of stuff non-pooled memory has. This, along with a bunch of other reasons, is why kernel exploits often look a bit different than user-mode exploits and we should know what we're looking at. If you've ever thrown an exe into a disassembler you'll see in drivers that there's a bunch of Mutexes, IRPs, ISRs, DPCs, and a bunch of stuff like that being called. This is happening from *non-pooled memory* whereas when you're reversing a PE file you won't see any of that stuff or at least rarely see these things. This is because executables are working from pooled (I like to just call it "normal" memory) virtual memory and has no access to low level structures - it can only ask the kernel to do these things through IRPs. Just to drive these points home, let's take a look at this in a debugger, open up WinDBG (aside: it's come to my attention that most OGs call this Windbag, but I sorta like Win Debug better). Attach locally to your kernel and let's take a look at this:
 
+```
+lkd> !vm
+Page File: \??\C:\pagefile.sys
+  Current:   3014656 Kb  Free Space:   3014648 Kb
+  Minimum:   3014656 Kb  Maximum:     50331648 Kb
+Page File: \??\C:\swapfile.sys
+  Current:     16384 Kb  Free Space:     16376 Kb
+  Minimum:     16384 Kb  Maximum:     25164264 Kb
+No Name for Paging File
+  Current:  67107824 Kb  Free Space:  67107132 Kb
+  Minimum:  67107824 Kb  Maximum:     67107824 Kb
+
+Physical Memory:          4194044 (   16776176 Kb)
+Available Pages:          3332119 (   13328476 Kb)
+ResAvail Pages:           3959228 (   15836912 Kb)
+Locked IO Pages:                0 (          0 Kb)
+Free System PTEs:      4294985064 (17179940256 Kb)
+
+******* 464832 kernel stack PTE allocations have failed ******
+
+
+******* 459598336 kernel stack growth attempts have failed ******
+
+Modified Pages:             26112 (     104448 Kb)
+Modified PF Pages:          25658 (     102632 Kb)
+Modified No Write Pages:       38 (        152 Kb)
+NonPagedPool    0:            231 (        924 Kb)
+NonPagedPoolNx  0:          17887 (      71548 Kb)
+NonPagedPool    1:              8 (         32 Kb)
+NonPagedPoolNx  1:          12233 (      48932 Kb)
+NonPagedPool Usage:           239 (        956 Kb)
+NonPagedPoolNx Usage:       30120 (     120480 Kb)
+NonPagedPool Max:      4294967296 (17179869184 Kb)
+PagedPool  0:               21987 (      87948 Kb)
+PagedPool  1:               15796 (      63184 Kb)
+PagedPool Usage:            37783 (     151132 Kb)
+PagedPool Maximum:     4294967296 (17179869184 Kb)
+Processor Commit:            2494 (       9976 Kb)
+Session Commit:              2920 (      11680 Kb)
+Shared Commit:              73067 (     292268 Kb)
+Special Pool:                   0 (          0 Kb)
+Kernel Stacks:              13104 (      52416 Kb)
+Pages For MDLs:              2652 (      10608 Kb)
+Pages For AWE:                  0 (          0 Kb)
+NonPagedPool Commit:        63749 (     254996 Kb)
+PagedPool Commit:           37783 (     151132 Kb)
+Driver Commit:              11926 (      47704 Kb)
+Boot Commit:                 4664 (      18656 Kb)
+PFN Array Commit:           49697 (     198788 Kb)
+System PageTables:            773 (       3092 Kb)
+ProcessLockedFilePages:        10 (         40 Kb)
+Pagefile Hash Pages:            0 (          0 Kb)
+Sum System Commit:         262839 (    1051356 Kb)
+Total Private:             541657 (    2166628 Kb)
+Misc/Transient Commit:        683 (       2732 Kb)
+Committed pages:           805179 (    3220716 Kb)
+Commit limit:             4947708 (   19790832 Kb)
+```
+
+We can see a lot of what I talked about above. Let's take a look at the `Page File: \??\C:\swapfile.sys` line. You might be thinking "but Alex, you're talking about RAM, why tf is this talking about a FILE". Well, when your OS is running out of memory it starts to use disk space as RAM, this is hugely inefficient as, well, it's not loaded to memory but instead has to do stuff with file operations. This is really slow, so if you've ever had your OS slow to a crawl and it takes 10 minutes to click the x in firefox, you're likely page swapping (Linux does this as well btw).
+
+Well this simple little post has turned into a whole thing. I'll continue down this rabbit hole tomorrow/whenever I have time!
 
 
 
