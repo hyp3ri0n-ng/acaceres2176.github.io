@@ -160,10 +160,31 @@ and it seemed like an interesting attack surface. Shared memory means that two p
 
 And that's that. OK enough of VMMap, let's talk a little about it's physical brother RAMMap:
 
+![RAMMap](rammap.PNG)
+![RAMMap2-Electric-Boogaloo](rammap2.PNG
+
+There's some overlap with VMMap but RAMMap talks mostly about physical memory. I've taken screenies of what I think are the most interesting tabs. Basically, they show a bunch of stuff about physical memory that are self explanatory. I've never used it in writing any exploits to be honest, it's still a little bit of black magic when people attack physical memory (like Rowhammer and such). These might come in useful, and I leave it as an exercise to the reader to  check this tool out. That's college professor speak for "go fuck yourself, I ain't explaining shit" so sorry about that.
+
+OK, let's talk a bit about memory protections, CPU, and then let's relate all of this back to 0-day hunting and memory attacks (we'll be looking at a write-what-where). How is memory protected, there's a short but pretty powerful list of how memory is protected in Win10:
+
+- What happens in kernel-mode stays in kernel-mode. Only kernel-mode instructions can access kernel pages. User processes can't.
+- Remember we talked about virtual addressing? Think of it as NAT for memory - physical memory is never directly referenced, each process gets its own virtual address space. Processes can't touch other process' virtual addy space, so even if we have shared physical memory between two processes, there's no context with which to know this for each process. In theory.
+- The windows API allows you to control page access type (read, write, execute). There's a bunch of low-level options to functions like VirtualProtect et al that allow you to control this. For example you can mark a page as read only, read-write only, execute only, etc.
+- Remember all that talk about attacking shared memory? They thought of that. Shared mem section objects have ACLs to make sure that only the processes that created that shared memory can access that shared memory. That makes it so that you can't have another process with a more global context attempt to inform each process of shared memory. Each process is blind to the fact that the memory is shared, it's abstracted away for a reason. 
+
+Simple huh? But it works. All of this talk about memory would be incomplete without talking a little about Data Execution Prevention (DEP) or NX on Linux (No Execute). The reason its called Data Execution Prevention is simple: each process is made up of two things, instructions that are meant to be executed and data that is usually operated on or read in some useful way by a process. Low-level snippets of assembly code are made up of what we call opcodes, two classic examples are 0xcc and 0x90, these are an interrupt and a nop (pronounced no-op, i.e. do nothing). Now let's look at some data: 0x41, 0x42. These are A and B in ascii encoding. What do you notice about the two? They're all just bytes! So how the fuck does a program know the difference? Standards! The PE (portable executable) format splits these things up into the data segment (holds data, like A and B) and the code segment that has the instructions that the CPU is going to run. Other than that - nothing differentiates them. We haven't talked about CPUs yet, but RIP is a CPU register (a little place where you can store a few bytes, in 64-bit land, 8 bytes aka 64 bits *gasp*) that points to (theoretically) somewhere in the code segment and executes instructions. But instructions are just series of bytes right (we call them opcodes)? And well, data is just a series of bytes too, so what if we were able to control where RIP is pointing to and put it somewhere in the data segment that we control (like an open file mapped to memory)? Alright, now we're talking exploit dev and 0-day hunting. As it turns out this is the premise of arbitrary code execution and the famous paper Smashing the Stack for Fun and Profit by Aleph1 and ruining everyone's con talk names by making them all fucking end in "For Fun and Profit" or some annoying jokey play on that. Alright so back to DEP, what this does is it marks the pages with data in them as non-executable, meaning if we point somewhere in the middle of the data, it's not just going to start thinking those are instructions and running them - it's going to throw a page fault and stop execution, log it, and generally ruin your day (and exploit). DEP is on by default in Win10.
+
+Now it's time to take a look at my favorite 0-day hunting tool: proc explorer. This benign-seeming tool gives you a fuckton of information.
 
 
 
- 
+
+
+
+
+
+
+
  
  
   
