@@ -146,8 +146,23 @@ An interesting tidbit I'm learning more about is shareable memory, I noticed it 
 
 ![Types of memory](vmmap_memtypes.PNG)
 
+and it seemed like an interesting attack surface. Shared memory means that two processes will use the same memory page, this is useful to save the very important limited physical memory (think about it - you have 128TB of addressable space *per process* and a solid modern laptop has something like 8-32GB of physical memory). But could this open up an attack vector where a not-important low privileged user has a process that has mapped a page to the same physical memory as a high privileged user with an important process with lots of cached goodies? Yep! And of course I'm not the first person to think of this (https://www.google.com/search?channel=tus2&client=firefox-b-1-d&q=shared+memory+attacks). Neat. So what are those other types of memory? Just for completion let's go through vmmap's categories. I don't like them, as they are different "layers" of categories, you'll see what I mean:
 
- 
+- Free - this is uhh, memory that is free and can be allocated.
+- Heap - uh, memory used by heaps.
+- Managed Heap - This is memory that's used by stuff where you don't have to explicitly define your heap usage (e.g. .NET in Windows manages its own memory unlike say, C++ or C)
+- Mapped File - This is mostly memory used by processes, it is a type of shareable memory (interesting?)
+- Stack - Memory used by stacks (more on stacks later)
+- Shareable - This is memory that is allowed to be shared with different processes. 
+- Page Table - This is private (unshareable) kernel physical memory that holds page table mappings
+- Private Data - Private memory, not shareable between processes
+- Unusable - we talked about this, due to memory management occuring in discrete chunks, some memory is wasted
+
+And that's that. OK enough of VMMap, let's talk a little about it's physical brother RAMMap:
+
+
+
+
  
  
  
