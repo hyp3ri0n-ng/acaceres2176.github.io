@@ -140,7 +140,9 @@ Commit limit:             4947708 (   19790832 Kb)
 
 We can see a lot of what I talked about above. Let's take a look at the `Page File: \??\C:\swapfile.sys` line. You might be thinking "but Alex, you're talking about RAM, why tf is this talking about a FILE". Well, when your OS is running out of memory it starts to use disk space as RAM, this is hugely inefficient as, well, it's not loaded to memory but instead has to do stuff with file operations. This is really slow, so if you've ever had your OS slow to a crawl and it takes 10 minutes to click the x in firefox, you're likely page swapping (Linux does this as well btw).
 
-Well this simple little post has turned into a whole thing. I'll continue down this rabbit hole tomorrow/whenever I have time!
+Well this simple little post has turned into a whole thing. I'll continue down this rabbit hole tomorrow/whenever I have time! OK picking this back up!
+
+An interesting tidbit I'm learning more about is shareable memory, I noticed it in VMMAP:
 
 
 
