@@ -144,9 +144,7 @@ Well this simple little post has turned into a whole thing. I'll continue down t
 
 An interesting tidbit I'm learning more about is shareable memory, I noticed it in VMMAP:
 
-
-
-
+![Types of memory](vmmap_memtypes.PNG)
 
 
  
