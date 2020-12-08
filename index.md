@@ -174,7 +174,154 @@ OK, let's talk a bit about memory protections, CPU, and then let's relate all of
 
 Simple huh? But it works. All of this talk about memory would be incomplete without talking a little about Data Execution Prevention (DEP) or NX on Linux (No Execute). The reason its called Data Execution Prevention is simple: each process is made up of two things, instructions that are meant to be executed and data that is usually operated on or read in some useful way by a process. Low-level snippets of assembly code are made up of what we call opcodes, two classic examples are 0xcc and 0x90, these are an interrupt and a nop (pronounced no-op, i.e. do nothing). Now let's look at some data: 0x41, 0x42. These are A and B in ascii encoding. What do you notice about the two? They're all just bytes! So how the fuck does a program know the difference? Standards! The PE (portable executable) format splits these things up into the data segment (holds data, like A and B) and the code segment that has the instructions that the CPU is going to run. Other than that - nothing differentiates them. We haven't talked about CPUs yet, but RIP is a CPU register (a little place where you can store a few bytes, in 64-bit land, 8 bytes aka 64 bits *gasp*) that points to (theoretically) somewhere in the code segment and executes instructions. But instructions are just series of bytes right (we call them opcodes)? And well, data is just a series of bytes too, so what if we were able to control where RIP is pointing to and put it somewhere in the data segment that we control (like an open file mapped to memory)? Alright, now we're talking exploit dev and 0-day hunting. As it turns out this is the premise of arbitrary code execution and the famous paper Smashing the Stack for Fun and Profit by Aleph1 and ruining everyone's con talk names by making them all fucking end in "For Fun and Profit" or some annoying jokey play on that. Alright so back to DEP, what this does is it marks the pages with data in them as non-executable, meaning if we point somewhere in the middle of the data, it's not just going to start thinking those are instructions and running them - it's going to throw a page fault and stop execution, log it, and generally ruin your day (and exploit). DEP is on by default in Win10.
 
-Now it's time to take a look at my favorite 0-day hunting tool: proc explorer. This benign-seeming tool gives you a fuckton of information.
+## Fuzzing Interlude
+
+As I was doing all of the above I realized I was ready to start some vulnerability hunting. We'll start with the basics and work our way into more and more complicated stuff. Kernel-land, despite having a lot of stuff to learn this is kinda random (64 byte aligned shit? wut?) is actually pretty simple once you've got the hang of it. The trick is to just look for some fairly simple patterns in assembly or a decompiler. But before we get into that, we want to maximize our hunting. If you've never seen my office I probably have circa 60-70 cores, most of them sitting there cold. So let's start fuzzing some stuff! The one trick I have for fuzzing is to google if something has ever been fuzzed. If it has, hit another part of the application. If it hasn't, hit the simplest possible part. One thing I haven't seen fuzzed that seems pretty complicated is explorer.exe's ability to open a variety of different files. Go ahead and try it, it's sorta like gnome-open or xdg-open in Linux, you point it at a file and if the extension is registered with a program it pops it open in whatever is most appropriate. This functionality seems like it'd need to know how to parse a lot of different things, find functionality, and then open the file in some manner. That's a few steps, and anything with more than a step or two IMHO is a decent target. So let's get down and dirty and fuzz it. I'll be using Binary Ninja, for one reason: Ilfak. Ilfak has never been particularly kind or nice whenever I buy an IDA license (I've bought like 3, totaling about 10k), one time he was downright rude when I asked when my download would come in, and third Ilfak your wallet pretty hard if we use IDA (wah wahh). So let's go with Binary Ninja and Ghidra, I'll be using the former for the wonderful lighthouse plugin and the latter for its decompiler if I feel like I need some extra help. As a debugger I'll be using x64 debug and kind of a new technique to me - I'm going to pop open explorer with a few files that I know it's going to recognize, step through the code with x64dbg, and see what lighthouse lights up. I'll know that this chain of functions (and their arguments!) are what make it do its thing, and I'll stop after everything is parsed but before explorer.exe pops some window open. I have no idea if this is actually going to work, but wtf why not, it's easier than trying to figure out what's going on with just a debugger and a decompiler. I've used lighthouse before for code coverage and fuzzing, but never for this, so we'll see if it's up to the task. I want to make sure I document my failures here and don't just leave you all with the impression that hacking is just things that work, failing hard is always an option.
+
+Ok let's get cracking, I've fired open Binary Ninja, cmder, and I have lighthouse installed as a plugin to Binary Ninja along with bncov (never used it but seems like a nice alternative to lighthouse if I for some reason have issues), and x64dbg. Right off the bat x64dbg comes in very very handy with downloading all the pdbs I need. Simply go to the "Symbols" tab, check out the imports, highlight all of them, right click, and click download all pdbs. Then I watched We Were Soldiers with Mel Gibson. This is an important step because symbols will take a while to download. Man, Vietnam was fucking stupid, fucking Lyndon Johnson am I right?? Anyway, back to hacking. I'm  going to need DynamoRio and a few iterations of running explorer.exe, then I'll see which functions pop out at me. It should be pretty easy to find the parsing function, and since I have symbols, things get even easier. So let's try it out. I ~~put on my robe and wizards hat~~ download DynamoRIO and get ready to use drcov. It's pretty simple to use, here's an example:
+
+`drrun.exe -t drcov -- explorer.exe folder/`
+
+This will pop open a folder, once again explorer has done some magic I don't yet understand, determined that I've passed it a folder, and opened the file explorer with that folder as the target. Again just complicated enough that there could be something juicy there. Let's try it out. But first things first, we need to know if explorer.exe being used by the system is 32 or 64 bit. I suspect it's 64 but what do I know? So I pop open process monitor and see which explorer.exe is being run (there's a few locations for it on the system). Looks like by default it uses `C:\windows\explorer.exe` so let's sigcheck it out:
+
+```>>> sigcheck.exe C:\Windows\explorer.exe
+
+Sigcheck v2.80 - File version and signature viewer
+Copyright (C) 2004-2020 Mark Russinovich
+Sysinternals - www.sysinternals.com
+
+c:\windows\explorer.exe:
+        Verified:       Signed
+        Signing date:   6:00 PM 10/22/2020
+        Publisher:      Microsoft Windows
+        Company:        Microsoft Corporation
+        Description:    Windows Explorer
+        Product:        Microsoft« Windows« Operating System
+        Prod version:   10.0.19041.610
+        File version:   10.0.19041.610 (WinBuild.160101.0800)
+        MachineType:    64-bit
+C:\Users\punkpc\Desktop\cmder
+```
+OMG I WAS RIGHT ABOUT SOMETHING. Anyway, now we know that we need to use the 64-bit DR client. So let's do that. OK done, it wasn't that exciting:
+
+```
+C:\Users\punkpc\Desktop\DynamoRIO-Windows-8.0.0-1\bin64
+Î»  .\drrun.exe -t drcov -- "C:\Windows\explorer.exe" "C:\Users\punkpc\Desktop\DynamoRIO-Windows-8.0.0-1\bin64"
+C:\Users\punkpc\Desktop\DynamoRIO-Windows-8.0.0-1\bin64
+Î»  ls
+
+
+    Directory: C:\Users\punkpc\Desktop\DynamoRIO-Windows-8.0.0-1\bin64
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a----         12/7/2020   7:18 PM         207360 balloon.exe
+-a----         12/7/2020   7:18 PM        4689920 balloon.pdb
+-a----         12/7/2020   7:18 PM         120320 closewnd.exe
+-a----         12/7/2020   7:18 PM        3829760 closewnd.pdb
+-a----         12/7/2020   7:18 PM         123904 create_process.exe
+-a----         12/7/2020   7:18 PM        3870720 create_process.pdb
+-a----         12/7/2020   7:18 PM         236544 drconfig.exe
+-a----         12/7/2020   7:18 PM        5058560 drconfig.pdb
+-a----         12/7/2020   7:18 PM         246272 drconfiglib.dll
+-a----         12/7/2020   7:18 PM           6920 drconfiglib.lib
+-a----         12/7/2020   7:18 PM         273920 DRcontrol.exe
+-a----         12/7/2020   7:18 PM        4878336 DRcontrol.pdb
+-a----         12/7/2020   7:33 PM         510871 drcov.explorer.exe.19900.0000.proc.log
+```
+
+You see the log file at the bottom there gives me my code coverage. Well, while that was happening I remembered a talk by Alex Ionescu called "reversing without reversing" and I realized I fucking did it again - I jumped straight into a reversing tool and forgot to do the most basic thing - look some shit up. I Googled something like "How does Windows Explorer work MSDN" and found a pretty solid resource: https://docs.microsoft.com/en-us/windows/win32/shell/developing-with-windows-explorer.
+
+Looks like Windows explorer has some interface definitions that are well documented. In fact it has a lot of them, they all seem worth fuzzing to be honest. But let's try to stick to the original intent. This all looks worth a read, so let's do that first and get a bit of an understanding of how we can programmatically do the stuff that explorer.exe does. In particular, how does it make the decision of what to do when I, in the command line type `explorer.exe <object>`. Let's see if that's in there somewhere.
+
+OK so from continued reading it looks like the explorer is really just an implementation of the Shell in windows. This makes sense, I've always told people that the way to think of the shell is just like an explorer window but in text. Looking back this is obvious, so a lot of the functionality I'm looking for is actually `Shell` functionality here. Cool. Another interesting tidbit, reading Common Explorer Concepts is that stuff in Windows explorer is divided into a few different things. Specifically, files, folders, and virtual folders. Virtual folders are stuff you'd see in explorer that aren't really folders, a good example is printers, you click on a printer just as if it was a folder but it's not a folder. This brings us to the most basic unit within a folder, the SHITEMID, which simply identifies some object within an Explorer folder, it looks like this:
+
+```
+typedef struct _SHITEMID { 
+    USHORT cb; 
+    BYTE   abID[1]; 
+} SHITEMID, * LPSHITEMID;
+```
+
+From MSDN: `The abID member is the object's identifier. The length of abID is not defined, and its value is determined by the folder that contains the object.` The details on how exactly a folder's objects are enumerated are here: https://docs.microsoft.com/en-us/windows/win32/shell/folder-info. As it turns out MSDN doesn't just call them "objects" by accident, they are implementations of that dirty baster COM objects. Anyway, I can feel us getting closer and closer to the functionality we want (and if not some additional stuff that might be worth a fuzz) when we list objects' attributes:
+
+```
+If you have an object's fully qualified path or PIDL, SHGetFileInfo provides a simple way to retrieve information about an object that is sufficient for many purposes. SHGetFileInfo takes a fully qualified path or PIDL, and returns a variety of information about the object including:
+
+    The object's display name
+    The object's attributes
+    Handles to the object's icons
+    A handle to the system image list
+    The path of the file containing the object's icon
+```
+
+Even not having found exactly what I want yet, already I'm interested by all of this functionality. From previous fuzzing and 0-day hunting I know that anything involving a structure that reports its own size is reasonably interesting. Why? Because oftentimes you'll find that internals of whatever will trust this value, meaning we could report a USHORT of 1 and have a name for it that is 10 bytes long, the hope would be that 1 byte is allocated and Windows attempts to shove 10 bytes into the buffer, creating overflow conditions. But that's a bit specific, let's keep going and see if we can fuzz some additional functionality along with that. I also still really want to get at that code that parses stuff and determines how explorer.exe will handle the various types of objects. 
+
+Ah and there it is: https://docs.microsoft.com/en-us/windows/win32/shell/app-registration. As it turns out there's really not any magic happening in Explorer.exe other than looking shit up in the registry. If an executable is in the registry with something like the following:
+
+```
+HKEY_CLASSES_ROOT
+   Applications
+      mspaint.exe
+         SupportedTypes
+            .bmp
+            .dib
+            .rle
+            .jpg
+            .jpeg
+            .jpe
+            .jfif
+            .gif
+            .emf
+            .wmf
+            .tif
+            .tiff
+            .png
+            .ico
+```
+
+anytime we go to open a .bmp file, mspaint is going to be used. Really, what's happening is this, say the user changes the default for .mp3 files to App2ID, the registry would undergo the following changes:
+
+```
+HKEY_CLASSES_ROOT
+   .mp3
+      (Default) = App1ProgID
+```
+
+
+```
+HKEY_CLASSES_ROOT
+   App1ProgID
+      shell
+         Verb1
+```
+
+
+```
+HKEY_CLASSES_ROOT
+   App2ProgID
+      shell
+         Verb2
+```
+
+And that pretty much takes care of it. There's no real magic happening there much to my dismay, and of course I should have known this going in - changing the default program that something is opened with is a fairly common operation in windows. The real vulnerabilities are just the friends we made along the way.
+
+But really, let's see if there's something in Explorer.exe that IS worth fuzzing.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
