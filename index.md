@@ -320,12 +320,217 @@ I not have a copy of explorer.exe named explorer2.exe, so I filter procmon to on
 ![procmon explorere2.exe](explorer2.PNG)
 
 
+Here you can see why Windows is an interesting attack surface. If you run something like strace on an ELF you see a decent amount of output, but it's reasonably readable. Windows on the other hand, does a fuckton of stuff that seems weirdly unnecessary. Half of it fails, some of it succeeds, and all of it can be analyzed for attack surface. I'm going to try to stay focused here, but one thing that is *always* worth doing, is opening up procmon, seeing which dlls a process is loading (sometimes it loads ones that don't even exist) and checking their permissions. One day I'll write a script that does this automatically, it shouldn't take long, I just haven't done it. DLL hijacking/replacement is a very common vulnerability, so any process that elevates its privileges should be checked to see if the dlls are world (or user) writable. If they are, you've got yourself a 0-day. Even these ridiculously simple vulns can be worth a few thousand dollars. But anyway, let's keep moving with our original intent.  
+
+Scrolling down about halfway we start to see some familiar looking stuff. Rememebr I mentioned that explorer.exe really uses Shell functions to do its thing?
+
+```
+8:47:45.3273338 AM	explorer2.exe	22164	RegOpenKey	HKCU\Software\Classes\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	NAME NOT FOUND	Desired Access: Query Value
+8:47:45.3273424 AM	explorer2.exe	22164	RegOpenKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Desired Access: Query Value
+8:47:45.3273556 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: Name
+8:47:45.3273631 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: HandleTags, HandleTags: 0x0
+8:47:45.3273712 AM	explorer2.exe	22164	RegOpenKey	HKCU\Software\Classes\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	NAME NOT FOUND	Desired Access: Maximum Allowed
+8:47:45.3273790 AM	explorer2.exe	22164	RegQueryValue	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder\Attributes	SUCCESS	Type: REG_DWORD, Length: 4, Data: 538443776
+8:47:45.3273860 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: Name
+8:47:45.3273936 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: HandleTags, HandleTags: 0x0
+8:47:45.3274014 AM	explorer2.exe	22164	RegOpenKey	HKCU\Software\Classes\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	NAME NOT FOUND	Desired Access: Maximum Allowed
+8:47:45.3274090 AM	explorer2.exe	22164	RegQueryValue	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder\CallForAttributes	NAME NOT FOUND	Length: 16
+8:47:45.3274158 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: Name
+8:47:45.3274235 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: HandleTags, HandleTags: 0x0
+8:47:45.3274313 AM	explorer2.exe	22164	RegOpenKey	HKCU\Software\Classes\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	NAME NOT FOUND	Desired Access: Maximum Allowed
+8:47:45.3274393 AM	explorer2.exe	22164	RegQueryValue	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder\RestrictedAttributes	NAME NOT FOUND	Length: 16
+8:47:45.3274467 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: Name
+8:47:45.3274547 AM	explorer2.exe	22164	RegQueryKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	Query: HandleTags, HandleTags: 0x0
+8:47:45.3274627 AM	explorer2.exe	22164	RegOpenKey	HKCU\Software\Classes\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	NAME NOT FOUND	Desired Access: Maximum Allowed
+8:47:45.3274705 AM	explorer2.exe	22164	RegQueryValue	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder\FolderValueFlags	SUCCESS	Type: REG_DWORD, Length: 4, Data: 0
+8:47:45.3274782 AM	explorer2.exe	22164	RegCloseKey	HKCR\CLSID\{98F275B4-4FFF-11E0-89E2-7B86DFD72085}\ShellFolder	SUCCESS	
+```
+
+There we start to see a bunch of shell operations querying the registry for stuff. Let's check it for the SupportedTypes attribute that I've been talking about.
+
+It's not worth a screenshot because what I found: nothing. This confused me for a minute as the documentation was pretty clear "Supported types", according to my understanding, is what TELLS explorer2.exe how to open a file right?? Well as it turns out this is only somewhat correct. It looks like instead of querying this itself, it delegates the SupportedTypes check to the actual process. So it seems the workflow is something like `I type explorer2.exe firefox.exe -> firefox.exe queries to see if the file I'm trying to open is in its SupportedTypes in the registry -> if yes, cool, report back and open, if no ask the user what to open it with`. In other words it just YOLOs it out and lets the process handle it for itself. Makes sense I suppose, opening a folder isn't going to have this because it's always going to be opened with explorer.exe natively.
+
+So now I started thinking - perhaps there's a better thing to fuzz here. If I were to find, for example a buffer overflow from reading a registry key how would I weaponize this? One way it could help would be for persistence purposes, a simple registry edit could provide persistence - but that's already do-able without a memory corruption exploit. My original intent was to be able to send a file that corrupts explorer.exe when opened. It looks like this is going to be somewhat difficult as it delegates everything to the process. So perhaps my original intent is now stupid. What do we do now? I have a saying, "when you fail, admit it early and pivot" so let's pivot. We've learned about some neat potential attack surface with windows explorer. In particular it is well documented and seems quite easy to get and set attributes of an "object" in a folder. So there's two possible scenarios I could see - one would be that we create an object that doesn't make sense, is invalid in some way, and causes some kind of corruption and/or memory disclosure via its API. Seems like a good place to fuzz. The other would be to mutate objects within a folder and list them, perhaps if we make a fucked up kind of object something bad will happen. Maybe some other fucked up shit will happen, what do I know? Seems like a decent place to start. So let's start playing around with the explorer API for fun and... yeah you get it.
+
+OK so here's a good starting point, MSDN has been kind enough to provide us with an example program!
+
+```
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <iostream.h>
+#include <objbase.h>
+
+int main()
+{
+    IShellFolder *psfParent = NULL;
+    LPITEMIDLIST pidlSystem = NULL;
+    LPCITEMIDLIST pidlRelative = NULL;
+    STRRET strDispName;
+    TCHAR szDisplayName[MAX_PATH];
+    HRESULT hr;
+
+    hr = SHGetFolderLocation(NULL, CSIDL_SYSTEM, NULL, NULL, &pidlSystem);
+
+    hr = SHBindToParent(pidlSystem, IID_IShellFolder, (void **) &psfParent, &pidlRelative);
+
+    if(SUCCEEDED(hr))
+    {
+        hr = psfParent->GetDisplayNameOf(pidlRelative, SHGDN_NORMAL, &strDispName);
+        hr = StrRetToBuf(&strDispName, pidlSystem, szDisplayName, sizeof(szDisplayName));
+        cout << "SHGDN_NORMAL - " <<szDisplayName << '\n';
+    }
+
+    psfParent->Release();
+    CoTaskMemFree(pidlSystem);
+
+    return 0;
+}
+```
+
+Along with a description of the above program:
+
+```
+The application first uses SHGetFolderLocation to retrieve the System folder's PIDL. It then calls SHBindToParent, which returns a pointer to the parent folder's IShellFolder interface, and the System folder's PIDL relative to its parent. It then uses the parent folder's IShellFolder::GetDisplayNameOf method to retrieve the display name of the System folder. Because GetDisplayNameOf returns a STRRET structure, StrRetToBuf is used to convert the display name into a normal string. After displaying the display name, the interface pointers are released and the System PIDL freed. Note that you must not free the relative PIDL returned by SHBindToParent.
+```
+
+I like this description. Not only is it very clear what's going on in the code (meaning I can edit it to create a fuzzing harness), the various objects and structures look generally interesting. That conversion into a display name just *sounds* to me like could be a bit tricky. But who knows, maybe somewhere else in there there is a gotcha for Windows developers. Fuzzing can cause some crazy shit to happen, which is exactly what we want. Looking at the `SHGetFolderLocation` API:
+
+```
+SHSTDAPI SHGetFolderLocation(
+  HWND             hwnd,
+  int              csidl,
+  HANDLE           hToken,
+  DWORD            dwFlags,
+  PIDLIST_ABSOLUTE *ppidl
+);
+```
+
+Ha, ok, so one of these (`HANDLE htoken`) is a process access token. I'm not totally clear here on how the API protects itself, what if I set this to an Administrator's or System's access token using something like Mimikatz? Even metasploit's meterpreter has a get_token functionality. I could get arbitrary privileged reads for stuff that I'm not even supposed to see. Let's put a pin in that for now and come back to it so we can focus on getting a fuzzer up and running. Let's throw this code into VSCode and compile it, just for a quick sanity check. Just as a quick note that second argument to SHGetFolderLocation which is set to CSIDL_SYSTEM which means we're going to get the System folder's default display name with that code. Pretty cool, things are starting to take shape here, and I think I know how I'm going to fuzz this, but I won't spoil it just yet. Let's get that compilation done:
+
+```
+C:\Users\punkpc\Desktop\0daze
+λ clang-cl.exe explorer_api_get_system_display_name.cpp ole32.lib shell32.lib shlwapi.lib
+explorer_api_get_system_display_name.cpp(1,17): warning: using directive refers to implicitly-defined namespace 'std'
+using namespace std;
+                ^
+1 warning generated.
+
+C:\Users\punkpc\Desktop\0daze
+λ ls
+explorer_api_get_system_display_name.cpp  explorer_api_get_system_display_name.exe*  explorer_api_get_system_display_name.obj
+
+C:\Users\punkpc\Desktop\0daze
+λ .\explorer_api_get_system_display_name.exe
+SHGDN_NORMAL - System32
+```
+
+This step took me longer than I'd like to admit. But there's a good reason for it! I'm going to give libfuzzer on Windows a try. I've used it on Linux before and it's ridiculously fast (I remember getting about 22k execs/sec on a decent laptop). It seems like this is a great option right now as everything is in memory. When using libfuzzer it's a good idea to have as much loaded into memory as possible (i.e. build a static executable). So let's get cracking on defining the functions we need to define and adding libfuzzer to this code.
+
+First let's see what else we can do with this code, in particular we're looking for what the "interesting" variables are. So let's get cracking, edit some of the code, write some hacky shit, and then fuzz away. Actually, let's start by simply commenting our code to see what each line is doing:
+
+```
+using namespace std;
+#include <shlobj.h>
+#include <shlwapi.h>
+#include <iostream>
+#include <objbase.h>
+
+int fuzzMeDrZaus()
+{
+
+    //This is the main "folder" interface. It is the representation of the folder in the form a COM object interface.
+    IShellFolder *psfParent = NULL; 
+
+    //Each file/folder/virtual object is represented by a series of SHITEMIDs (SH item IDs, not shite MIDs as I read it)
+    //Think of SHITEMIDs as filename or folder name and the LPITEMIDLIST as a fully qualified path or rather a list of SHITEMID structures
+    LPITEMIDLIST pidlSystem = NULL;
+    LPCITEMIDLIST pidlRelative = NULL;
+
+    //this is where we're gong to shove the display name when we call GetDisplayNameOf (a human readable representation of an LPCITEMIDLIST)
+    //The STRRET type is specific to the IShellFolder interface and is meant to hold its string. It's really a struct but it's fucking
+    //complicated to let's just pretend it's a string.
+    STRRET strDispName;
+ 
+    //This is going to hold the actual string in the above struct, so it's an array of chars
+    TCHAR szDisplayName[MAX_PATH];
+
+    //The fucking result, for error checking we're not going to do because fuck that noise (and it slows down the fuzzer)
+    HRESULT hr;
+
+
+    /*
+    SHSTDAPI SHGetFolderLocation(
+      HWND             hwnd,
+      int              csidl,
+      HANDLE           hToken,
+      DWORD            dwFlags,
+      PIDLIST_ABSOLUTE *ppidl
+    );
+    */
+   //This is really just being used as a vessel for that second arg for which CSIDL_SYSTEM will be specified
+   //A CSIDL == Constant Special Item ID List
+   //This function returns the path of a folder but as an ITEMIDLIST. So this is saying gimme an ITEMIDLIST
+   //that points to the special System folder (system32). Neat.
+   //The last argument is where the actual ITEMIDLIST is going to be stored, i.e. what we give a fuck about
+    hr = SHGetFolderLocation(NULL, CSIDL_SYSTEM, NULL, NULL, &pidlSystem);
+
+    /*
+    SHSTDAPI SHBindToParent(
+      PCIDLIST_ABSOLUTE pidl,
+      REFIID            riid,
+      void              **ppv,
+      PCUITEMID_CHILD   *ppidlLast
+    );
+    */
+   //This function will return an interface pointer to the parent folder of pidlSystem (the ITEMIDLIST for system)
+   //In other words it takes the first arg and shoves the parent of the ItemID into psfParent
+   //pidRelative us the items PIDL relative to the parent folder. In other words this is saying
+   //"give me the fucking parent of the thing I give you (System folder here). Give it to me as an IShellFolder item,
+   //and while you're add it why don't you gimme the relative path to the parent folder too." Note we seem to be 
+   //getting the System folder (i.e. "C:\Windows\System32"), grabbing the parent Windows\ and then getting the relative
+   //path from there to System32 (i.e. "System32"). Seems kinda weird but OK.
+    hr = SHBindToParent(pidlSystem, IID_IShellFolder, (void **) &psfParent, &pidlRelative);
+
+
+    //Assuming all the above shit checks out...
+    if(SUCCEEDED(hr))
+    {
+        //use the IShellInterface COM object interface GetDisplayNameOf for the relative path of the parent folder to the system folder, 
+        //give me a normal fucking string, and shove it in strDispName, note this is going to shove System32 into *strDispName.
+        hr = psfParent->GetDisplayNameOf(pidlRelative, SHGDN_NORMAL, &strDispName);
+
+        //This function literally only exists to get the display name and store it into the third arg, szDisplayName
+        hr = StrRetToBuf(&strDispName, pidlSystem, szDisplayName, sizeof(szDisplayName));
+
+        //Output the display name
+        cout << "SHGDN_NORMAL - " << szDisplayName << '\n';
+    }
+
+
+    //I..... release you.
+    psfParent->Release();
+
+    //Gimme my fucking memory back.
+    CoTaskMemFree(pidlSystem);
+
+    //Yay all is well. Or is it????? (it is)
+    return 0;
+}
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size) {
 
 
 
+}
+```
 
+The above gives you an idea of how folders and shit work. To be honest it's pretty insane. There's really not a good visual representation of things and you're highly
+dependent on the IShellFolder methods to do absolutely anything. This sucks for you coders out there, but it's pretty great for us hackers. This is needlessly complicated
+and where things are needlessly complicated there are bugs when they're implemented. I don't know what chucklehead thought this was a good idea, but ok, let's roll with
+it.
 
-
+You can see at the bottom I'm getting ready to use LibFuzzer against this. I just need to decide which input I'm going to fuzz. I think I'm going to fuzz the GetDisplayNameOf
+function at it seems to be one of the most appropriate ones as the global state is fairly well established at that point and I'm asking it to perform a weird and (for some ungodly reason) difficult transformationp into a human readable string. I'm going to just roll with this code with a slight modification, but a few of these APIs seem fuzzable. Let's just get something running and iterate over it afterward.
 
 
 
